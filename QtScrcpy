@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+export QTSCRCPY_ADB_PATH="$HERE/bin/adb"
+export QTSCRCPY_SERVER_PATH="$HERE/share/scrcpy-server"
+export QTSCRCPY_DEFAULT_CONFIG_PATH="$HERE/share/config"
+export QTSCRCPY_DEFAULT_KEYMAP_PATH="$HERE/share/keymap"
+exec "$HERE/bin/QtScrcpy" "$@"
