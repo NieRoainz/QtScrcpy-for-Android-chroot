@@ -2,6 +2,12 @@
 
 QtScrcpy ARM64 desktop application packaged for use from an **ARM64 Linux userspace running on an Android device**. The intended environments are Termux with a Debian/Ubuntu userspace (for example, through `proot-distro`) and a conventional rooted Linux chroot.
 
+**Short compatibility note:** Designed for Android devices running ARM64 Debian/Ubuntu through Termux (`proot-distro`) or a rooted Linux chroot. It does not run directly in native Termux.
+
+## Demo
+
+The project demo is a 43-second portrait MP4. The video has not yet been uploaded as a GitHub Release asset, so an inline player cannot be embedded here yet. Once the MP4 is attached to the `QtScrcpy-for-Android-chroot` release, its GitHub-hosted video URL can be added here for playback in the GitHub README.
+
 > **Important:** This is a Linux ARM64 application, not an Android APK. The QtScrcpy executable is built for a glibc-based Linux userspace. It is not expected to run directly in Termux's native Android/Bionic environment.
 
 ## What this project provides
