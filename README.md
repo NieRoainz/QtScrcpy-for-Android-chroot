@@ -1,257 +1,133 @@
-# QtScrcpy for Android Termux + Linux Chroot
+# Roainxztar
 
-QtScrcpy ARM64 desktop application packaged for use from an **ARM64 Linux userspace running on an Android device**. The intended environments are Termux with a Debian/Ubuntu userspace (for example, through `proot-distro`) and a conventional rooted Linux chroot.
+**Roainxztar** is an ARM64 Linux desktop application project for displaying and controlling Android devices from an Android-hosted Linux userspace.
 
-**Short compatibility note:** Designed for Android devices running ARM64 Debian/Ubuntu through Termux (`proot-distro`) or a rooted Linux chroot. It does not run directly in native Termux.
+The application is intended for **AArch64/glibc** environments such as Debian, Ubuntu, Parrot and Kali running through Termux `proot-distro` or a rooted Android chroot. It is not an Android APK and is not designed to run directly in Termux's native Android/Bionic shell.
 
-## Demo
+> [!IMPORTANT]
+> This repository is in a source-port/build transition. The current branch contains packaging scripts and documentation, but it does **not yet contain the complete application executable, ADB payload, scrcpy server payload, or upstream C++ source tree**. Do not treat the current branch as a complete runnable release.
 
-The project demo is a 43-second portrait MP4. The video has not yet been uploaded as a GitHub Release asset, so an inline player cannot be embedded here yet. Once the MP4 is attached to the `QtScrcpy-for-Android-chroot` release, its GitHub-hosted video URL can be added here for playback in the GitHub README.
+## Project identity
 
-> **Important:** This is a Linux ARM64 application, not an Android APK. The QtScrcpy executable is built for a glibc-based Linux userspace. It is not expected to run directly in Termux's native Android/Bionic environment.
+- Product/application name: **Roainxztar**
+- Target architecture: **ARM64 / AArch64**
+- Runtime target: **Linux with glibc**
+- Android-hosted environments: **Termux + Debian/Ubuntu proot-distro** and rooted Linux chroots
+- Desktop display: **X11 / XWayland**
+- Upstream application technology: QtScrcpy
+- Upstream source: [barry-ran/QtScrcpy](https://github.com/barry-ran/QtScrcpy)
+- Core library: [barry-ran/QtScrcpyCore](https://github.com/barry-ran/QtScrcpyCore)
 
-## What this project provides
+QtScrcpy is the upstream codebase used as the starting point. Roainxztar is the product identity for this ARM64 Android-hosted Linux adaptation; this repository does not claim ownership of the upstream project.
 
-- An ARM64 QtScrcpy application launcher.
-- A bundled ADB client and scrcpy server (when the complete runtime payload is present).
-- Default configuration and keymap directories.
-- An optional sndcpy helper and APK.
-- `required.sh`, an APT-based installer for the Linux runtime libraries.
+## Build direction
 
-The launcher sets the paths QtScrcpy uses for ADB, the scrcpy server, configuration and keymaps, then starts the application binary.
+The project is moving away from relying on a prebuilt executable tied to one distribution's shared-library ABI. The intended build pipeline is:
 
-## Compatibility overview
+1. Fetch the upstream source and its required submodules.
+2. Build natively for AArch64 using a controlled ARM64 Linux build environment.
+3. Resolve and validate Qt, FFmpeg and other runtime dependencies against the target ABI.
+4. Package the application, ADB, scrcpy server, configuration, keymaps and required Qt runtime components.
+5. Run dependency and launch checks in a distro test matrix.
+6. Publish a versioned ARM64 package only after the runtime tests pass.
 
-| Environment | Compatibility | Notes |
-|---|---|---|
-| Termux native shell | **Not directly supported** | Native Termux uses Android/Bionic; this Linux executable expects glibc. |
-| Termux + Debian/Ubuntu via `proot-distro` | **Intended use** | Run the application inside the distro, with an X11 display server available from Android. |
-| Rooted Debian/Ubuntu chroot | **Intended use** | Requires ARM64 userspace, glibc, GUI display access and ADB/device access. |
-| Ordinary ARM64 Debian/Ubuntu desktop | **Potentially compatible** | Requires the listed runtime libraries and a working graphical session. |
-| x86/x86_64 Linux | **Not supported by this ARM64 build** | Use an executable built for the target architecture. |
+The initial compatibility target is **glibc-based ARM64 distributions**. Debian, Ubuntu, Parrot and Kali are candidates for validation; compatibility is not guaranteed until each is tested. Alpine/musl requires a separate build and is not covered by the glibc package.
 
-Compatibility depends on the Linux distribution and its library versions. The included dependency script uses package names found in newer Debian/Ubuntu repositories (including the `t64` library package names); older releases may need package-name adjustments.
+## Current repository status
 
-## Requirements
+| Component | Status |
+|---|---|
+| Roainxztar product identity and documentation | In progress |
+| ARM64 packaging/dependency scripts | Present; require review against the new build |
+| Complete upstream C++ source tree | Not yet imported |
+| ARM64 executable | Not present in the current branch |
+| Bundled ADB and scrcpy server | Not present in the current branch |
+| Portable Qt/FFmpeg runtime packaging | Not implemented |
+| ARM64 CI build and distro tests | Not implemented |
+| Release package | Not ready |
 
-- Android device with a 64-bit ARM CPU and an ARM64 Linux userspace.
-- Termux installed from a supported distribution source, if using the Termux route.
-- Debian or Ubuntu ARM64 installed inside Termux, or a conventional ARM64 chroot.
-- A graphical X11/XWayland server reachable from the Linux userspace.
-- Qt 5, XCB, OpenGL, FFmpeg, audio, USB and ADB runtime libraries.
-- ADB access to the Android device being controlled.
+## Android-side requirements
 
-QtScrcpy is a GUI program. Having the Linux distro installed is not enough: the display server and its socket/environment must also be available inside the distro.
+- An Android device with an ARM64 CPU.
+- Termux for the proot-distro route, or a rooted chroot manager.
+- A Debian/Ubuntu-based ARM64 userspace for the initial setup.
+- An X11 server such as Termux:X11, with its socket and display environment accessible inside the distro.
+- Android Developer options and ADB debugging enabled on the device being controlled.
 
-## Option A — Termux with Debian/Ubuntu (proot-distro)
+## Environment setup
 
-### 1. Install the Android-side components
+### Termux + Debian/Ubuntu (proot-distro)
 
-Install Termux and the Termux:X11 Android application from their official project/distribution sources. In Termux, install the Termux:X11 companion package and proot-distro:
+In Termux:
 
 ```bash
 pkg update && pkg upgrade
-pkg install x11-repo
-pkg install termux-x11-nightly proot-distro
-```
-
-Install a Debian or Ubuntu ARM64 distro:
-
-```bash
+pkg install x11-repo termux-x11-nightly proot-distro
 proot-distro install debian
-proot-distro login debian
 ```
 
-You can use another supported ARM64 distro, but the dependency installer in this repository is written for APT-based Debian/Ubuntu systems.
-
-### 2. Start the X11 display
-
-In the Termux session (outside the proot distro), start Termux:X11:
+Start the X server from Termux:
 
 ```bash
 termux-x11 :1 &
 ```
 
-Open the Termux:X11 Android app. Then enter the Linux distro in another Termux session:
+Open the Termux:X11 Android app, then enter the distro in another Termux session:
 
 ```bash
 proot-distro login debian
 export DISPLAY=:1
-```
-
-If your display server uses a different display number, set `DISPLAY` to match it. The X11 socket must be accessible from the distro. Some setups may require additional shared-directory or socket configuration; proot does not automatically guarantee access to every Android-side socket or device.
-
-### 3. Install dependencies inside Debian/Ubuntu
-
-Copy or clone this project into the Linux distro, then run the installer **inside the distro**, not in the native Termux shell:
-
-```bash
-cd QtScrcpy-for-Android-chroot
-chmod +x required.sh QtScrcpy
-./required.sh
-```
-
-The installer requires root inside the distro. If your distro login is not root, use its supported `sudo`/root login method.
-
-If APT reports that a package cannot be found, your distribution release may use different Qt 5 or `t64` package names. Update the package list for your distro rather than trying to install Linux packages with Termux's `pkg` command.
-
-### 4. Launch
-
-From the project directory, inside the Linux distro:
-
-```bash
-export DISPLAY=:1
-./QtScrcpy
-```
-
-The launcher resolves its own directory, configures the bundled runtime paths, and starts `bin/QtScrcpy`.
-
-## Option B — Rooted Linux chroot
-
-For a conventional chroot, make sure the root filesystem is ARM64 and provides glibc. Bind or expose the resources the GUI and ADB need before entering the chroot.
-
-Typical host-side preparation may include access to:
-- The X11 socket directory used by your Android X server (commonly `/tmp/.X11-unix`).
-- Relevant device nodes if you intend to use USB ADB.
-- Audio sockets/devices if you need audio features.
-- GPU/render devices only if your chroot and Android graphics stack support them.
-
-The exact bind mounts depend on the Android ROM, chroot manager, X server and device permissions. Do not blindly mount every host device into the chroot.
-
-Inside the chroot:
-
-```bash
-dpkg --print-architecture
-# Expected: arm64
-
-cd /path/to/QtScrcpy-for-Android-chroot
-chmod +x required.sh QtScrcpy
-./required.sh
-export DISPLAY=:1
-./QtScrcpy
-```
-
-Set `DISPLAY` to the display number provided by your X server. For example, `:1` is common in some Android X11 setups, but it is not universal.
-
-## ADB connection notes
-
-QtScrcpy needs ADB to see the Android device.
-
-### Wireless ADB
-
-Wireless debugging can avoid USB passthrough problems. Enable Wireless debugging in Android Developer options, pair/connect using the ADB pairing details shown by Android, and verify:
-
-```bash
-./bin/adb devices
-```
-
-The pairing and connection ports are shown by Android and may change; do not assume a fixed port.
-
-### USB ADB
-
-USB ADB from a chroot/proot environment is more complicated. The USB device node, permissions and required interfaces must be visible to the Linux userspace. A proot environment generally cannot grant itself host-level device access. Configure USB passthrough from the Android host/chroot manager where supported.
-
-If ADB already works in the Termux host but not inside the distro, you may need to use a shared ADB server or configure ADB connectivity explicitly. Check which ADB server the client is using and avoid starting conflicting ADB servers on the same port.
-
-Always verify ADB independently before troubleshooting QtScrcpy:
-
-```bash
-./bin/adb version
-./bin/adb devices
-```
-
-## Runtime layout
-
-The expected extracted layout is:
-
-```text
-QtScrcpy-for-Android-chroot/
-├── QtScrcpy                 # launcher script
-├── required.sh              # APT runtime dependency installer
-├── README.md
-├── bin/
-│   ├── QtScrcpy             # ARM64 Linux executable
-│   ├── adb                  # ADB client
-│   └── sndcpy.sh            # optional sndcpy helper
-└── share/
-    ├── scrcpy-server
-    ├── sndcpy.apk
-    ├── config/
-    │   └── config.ini
-    └── keymap/
-        └── *.json
-```
-
-Keep the `bin/` and `share/` directories beside the top-level `QtScrcpy` launcher. The launcher uses paths relative to its own location; moving individual files or directories will break those paths.
-
-## Troubleshooting
-
-### `Exec format error` or executable will not start
-
-Check the architecture and executable type:
-
-```bash
 uname -m
-file bin/QtScrcpy
 dpkg --print-architecture
 ```
 
-This build is for ARM64/aarch64 Linux. It also expects a glibc-based environment; the native Termux/Bionic shell is not the target.
+Expected architecture: `aarch64` / `arm64`.
 
-### `error while loading shared libraries`
+### Rooted Linux chroot
 
-Check unresolved dependencies:
+The chroot must provide an ARM64 glibc userspace. The host must expose the required X11 socket and any device/audio resources that the application needs. Only bind-mount resources that are actually required; a chroot does not automatically grant safe access to every Android device node.
 
-```bash
-ldd bin/QtScrcpy | grep 'not found'
-```
+## Dependency diagnostics
 
-Install the missing libraries using APT inside the distro. Do not run `ldd` on the top-level `QtScrcpy` launcher: it is a shell script, not the ELF application.
-
-### Qt says the `xcb` platform plugin cannot be loaded
-
-Confirm that the X server is running and that `DISPLAY` is correct:
+Run the checker from the repository root:
 
 ```bash
-echo "$DISPLAY"
-ls -la /tmp/.X11-unix 2>/dev/null
+bash check-deps.sh
 ```
 
-Install the Qt XCB platform plugin and its X11/XCB dependencies in the Linux distro. A message saying that the plugin was found does not necessarily mean all of its dependent libraries are present.
+The checker reports unresolved shared libraries for the packaged application and ADB when those files are present. A missing executable is a packaging issue, not a library dependency that the installer can fix.
 
-### The window does not appear
+**Do not create fake SONAME symlinks.** For example, FFmpeg 7 libraries (`.so.61/.59/.8`) are not ABI-compatible drop-in replacements for FFmpeg 6 libraries (`.so.60/.58/.7`). The final build must either use the correct runtime ABI or be rebuilt against a supported dependency baseline.
 
-- Open the Termux:X11 Android app.
-- Confirm that the Linux distro can access the X11 socket.
-- Check `DISPLAY` and any X authorization requirements.
-- Run QtScrcpy from a terminal and inspect the full error output.
+## ADB access
 
-### ADB shows no devices
+Wireless debugging is the preferred initial connection method in proot environments because USB passthrough may be unavailable. Pair and connect using the IP address and ports shown by Android's Wireless debugging screen, then verify:
 
 ```bash
-./bin/adb kill-server
-./bin/adb start-server
-./bin/adb devices -l
+adb devices -l
 ```
 
-Check Wireless debugging pairing/connection or USB passthrough and permissions. ADB working in the Android host does not automatically mean it is available inside a chroot.
+USB ADB requires the USB device nodes and permissions to be exposed by the Android host/chroot manager. A proot process cannot grant itself host-level USB access. Do not expose an ADB server to untrusted networks.
 
-### Audio or screen capture problems
+## Runtime permissions
 
-Audio capture and display rendering depend on the Android-side permissions, Linux audio/display sockets and device support. First confirm that the QtScrcpy window works, then test ADB and the scrcpy connection separately.
+The installer may set executable/read permissions on files inside the project directory. It cannot grant Android host permissions, bypass Android security policy, or automatically authorize access to arbitrary host device nodes. Any required Android permission or privileged bind mount must be approved and configured by the device owner.
 
-## Security and limitations
+## Upstream and licensing
 
-- Only install APKs and use ADB commands for devices you own or are authorized to administer.
-- Do not expose an ADB server to untrusted networks.
-- The dependency installer installs system packages inside the Linux distro; review it before running.
-- This project does not make a proot distro equivalent to a fully privileged chroot. Hardware access, USB, GPU acceleration and audio may be restricted by Android and the container environment.
-- This repository targets ARM64 Linux on Android-hosted userspaces. It does not promise compatibility with every Android version, ROM, distro release or display server.
+The upstream QtScrcpy project and QtScrcpyCore are published separately. Review their license files and preserve upstream copyright and license notices when source is imported or redistributed. Roainxztar-specific scripts and packaging changes must retain their own clear attribution.
 
-## Project status
+- [QtScrcpy upstream repository](https://github.com/barry-ran/QtScrcpy)
+- [QtScrcpyCore upstream repository](https://github.com/barry-ran/QtScrcpyCore)
+- [scrcpy upstream project](https://github.com/Genymobile/scrcpy)
 
-This repository documents and packages the ARM64 QtScrcpy runtime for Android-hosted Linux environments. Check the repository contents and releases to confirm that all runtime payload files (`bin/QtScrcpy`, `bin/adb`, `share/scrcpy-server`, configuration/keymap data and optional sndcpy assets) are present before launching.
+## Important limitations
 
-## License and upstream components
+- Native Termux uses Android/Bionic and is not the target for a glibc-linked Linux executable.
+- proot does not provide the same hardware access as a privileged chroot.
+- GPU acceleration, audio, USB and X11 socket access depend on the Android ROM, host app and container setup.
+- A successful compile does not establish distro compatibility; the packaged binary must be tested in each supported environment.
 
-QtScrcpy, scrcpy, ADB, sndcpy and their bundled components may have separate upstream licenses. Consult the corresponding upstream project and license notices before redistribution.
+---
+
+*Roainxztar is an independent ARM64 packaging/build effort based on the upstream QtScrcpy codebase. It is not an official QtScrcpy release.*
