@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # QtScrcpy ARM64 Linux runtime dependency installer
-# Supported target: Ubuntu/Debian ARM64 userspace (including Android chroot).
+# Supports APT-based Debian/Ubuntu derivatives, including Parrot OS.
 set -Eeuo pipefail
 
 if [[ "${EUID}" -ne 0 ]]; then
@@ -19,12 +19,41 @@ if ! command -v apt-get >/dev/null 2>&1; then
 fi
 
 export DEBIAN_FRONTEND=noninteractive
+
+echo "[*] Updating APT package indexes..."
+apt-get update
+
+# Select the first package name available in this distro's repositories.
+choose_package() {
+  local candidate
+  for candidate in "$@"; do
+    if apt-cache show "$candidate" >/dev/null 2>&1; then
+      printf '%s\n' "$candidate"
+      return 0
+    fi
+  done
+  echo "[!] None of these package variants are available: $*" >&2
+  return 1
+}
+
 packages=(
   adb
-  libqt5core5t64 libqt5gui5t64 libqt5widgets5t64 libqt5network5t64
-  libqt5dbus5t64 libqt5opengl5t64 libqt5multimedia5 libqt5x11extras5 libqt5xcbqpa5
-  libavcodec60 libavformat60 libavutil58 libswscale7
-  libasound2t64 libpulse0
+  "$(choose_package libqt5core5t64 libqt5core5)"
+  "$(choose_package libqt5gui5t64 libqt5gui5)"
+  "$(choose_package libqt5widgets5t64 libqt5widgets5)"
+  "$(choose_package libqt5network5t64 libqt5network5)"
+  "$(choose_package libqt5dbus5t64 libqt5dbus5)"
+  "$(choose_package libqt5opengl5t64 libqt5opengl5)"
+  "$(choose_package libqt5multimedia5t64 libqt5multimedia5)"
+  libqt5x11extras5
+  # Debian/Parrot package the Qt xcb platform plugin with the Qt GUI runtime;
+  # libqt5xcbqpa5 is not a package name in these repositories.
+  "$(choose_package libavcodec61 libavcodec60 libavcodec59)"
+  "$(choose_package libavformat61 libavformat60 libavformat59)"
+  "$(choose_package libavutil59 libavutil58 libavutil57)"
+  "$(choose_package libswscale8 libswscale7 libswscale6)"
+  "$(choose_package libasound2t64 libasound2)"
+  libpulse0
   libgl1 libglx0 libx11-6 libx11-xcb1 libxext6 libxrender1
   libxcb1 libxcb-icccm4 libxcb-image0 libxcb-keysyms1 libxcb-randr0
   libxcb-render-util0 libxcb-shape0 libxcb-sync1 libxcb-xfixes0
@@ -33,10 +62,9 @@ packages=(
   libusb-1.0-0 libudev1
 )
 
-echo "[*] Updating APT package indexes..."
-apt-get update
 echo "[*] Installing QtScrcpy ARM64 runtime dependencies..."
 apt-get install -y --no-install-recommends "${packages[@]}"
+
 echo
 echo "[+] Runtime dependencies installed."
 echo "[*] If the GUI display is not detected, set DISPLAY (for example: export DISPLAY=:1)."
