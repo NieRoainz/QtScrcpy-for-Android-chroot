@@ -131,3 +131,42 @@ The upstream QtScrcpy project and QtScrcpyCore are published separately. Review 
 ---
 
 *Roainxztar is an independent ARM64 packaging/build effort based on the upstream QtScrcpy codebase. It is not an official QtScrcpy release.*
+
+
+## Cross-distribution dependency installer
+
+The reference ARM64 executable is dynamically linked. Its Qt 5 runtime needs the Qt 5 multimedia/X11 stack, and its video path is linked specifically to the **FFmpeg 6 ABI**:
+
+- `libavformat.so.60`
+- `libavcodec.so.60`
+- `libavutil.so.58`
+- `libswscale.so.7`
+
+The updated `required.sh` detects common Linux package managers and installs the matching Qt/X11/audio/USB runtime packages where available:
+
+| Package manager | Distribution families (examples) |
+|---|---|
+| APT | Debian, Ubuntu, Parrot, Kali |
+| DNF | Fedora and compatible RPM distributions |
+| Pacman | Arch Linux and derivatives |
+| Zypper | openSUSE |
+| XBPS | Void Linux (glibc variant) |
+| Portage | Gentoo |
+
+Run it inside the target ARM64 glibc distro:
+
+```bash
+bash required.sh
+```
+
+Then inspect unresolved dependencies:
+
+```bash
+bash check-deps.sh
+```
+
+**Important compatibility boundary:** package-manager detection is not a guarantee that every distribution repository carries the required FFmpeg 6 ABI. Some current distributions ship FFmpeg 7 or 8 instead. The installer reports unresolved libraries rather than creating unsafe SONAME symlinks. If the exact FFmpeg 6 libraries are unavailable, this prebuilt binary still needs a compatible FFmpeg 6 runtime or a rebuild against the target distribution.
+
+Native Termux (Android/Bionic) and Alpine (musl) are not supported by this glibc binary. Use a Debian/Ubuntu/other glibc userspace inside proot/chroot, or create a separate native/musl build. A package installer cannot overcome libc or binary ABI incompatibility.
+
+The uploaded Ubuntu-oriented reference archive is a prebuilt ARM64 package, not source code. Broad distro support for the application itself still requires testing the actual binary and all of its transitive dependencies on each target distro; this installer only automates dependency setup where compatible packages exist.
