@@ -1,141 +1,157 @@
-name: Ubuntu
-on: 
+name: Linux ARM64 chroot build
+
+on:
+  workflow_dispatch:
   push:
+    branches: [dev]
     paths:
       - 'QtScrcpy/**'
-      - '!QtScrcpy/res/**'
+      - 'config/**'
+      - 'keymap/**'
+      - 'ci/**'
       - '.github/workflows/ubuntu.yml'
-      - 'ci/linux/**'
   pull_request:
     paths:
       - 'QtScrcpy/**'
-      - '!QtScrcpy/res/**'
+      - 'config/**'
+      - 'keymap/**'
+      - 'ci/**'
       - '.github/workflows/ubuntu.yml'
-      - 'ci/linux/**'
+
+permissions:
+  contents: read
+
 jobs:
-  build:
-    name: Build
-    runs-on: ubuntu-22.04
-    container:
-      image: ubuntu:20.04
-      options: --privileged
-    strategy:
-      matrix:
-        qt-ver: [5.15.2]
-        qt-arch-install: [gcc_64]
-        gcc-arch: [x64]
+  build-arm64:
+    name: Build QtScrcpy for ARM64 Linux chroot
+    runs-on: ubuntu-24.04-arm
+    timeout-minutes: 45
     env:
-      target-name: QtScrcpy
-      qt-install-path: ${{ github.workspace }}/Qt/${{ matrix.qt-ver }}
-      plantform-des: ubuntu
       DEBIAN_FRONTEND: noninteractive
     steps:
-      - name: Install Git and basic dependencies
-        run: |
-          apt-get update
-          apt-get install -y git ca-certificates sudo
-      - uses: actions/checkout@v2
+      - name: Checkout source and submodules
+        uses: actions/checkout@v4
         with:
+          submodules: recursive
           fetch-depth: 0
-          submodules: 'true'
-          ssh-key: ${{ secrets.BOT_SSH_KEY }}
-      - name: Install system dependencies
+
+      - name: Install ARM64 build and runtime dependencies
         run: |
-          apt-get update
-          apt-get install -y \
-            build-essential \
-            cmake \
-            libglew-dev \
-            libglfw3-dev \
-            imagemagick \
-            wget \
-            patchelf \
-            zip \
-            libxcb1-dev \
-            libxkbcommon-dev \
-            libxkbcommon-x11-dev \
-            libx11-dev \
-            libx11-xcb-dev \
-            libfontconfig1-dev \
-            libfreetype6-dev \
-            libxrender-dev \
-            libxext-dev \
-            gnupg \
-            lsb-release \
-            python3 \
-            python3-pip \
-            fuse \
-            libasound2-dev
-      - name: Setup FUSE
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential cmake ninja-build pkg-config git ca-certificates \
+            qtbase5-dev qtmultimedia5-dev libqt5x11extras5-dev libqt5opengl5-dev \
+            libx11-dev libx11-xcb-dev libxcb1-dev libxcb-xinerama0-dev \
+            libxcb-randr0-dev libxcb-shape0-dev libxcb-xfixes0-dev \
+            libxkbcommon-dev libxkbcommon-x11-dev libgl1-mesa-dev \
+            libasound2-dev libpulse-dev libavformat-dev libavcodec-dev \
+            libavutil-dev libswscale-dev zlib1g-dev android-tools-adb \
+            file binutils patchelf
+
+      - name: Verify native ARM64 runner
         run: |
-          apt-get install -y fuse
-          if [ ! -e /dev/fuse ]; then
-            mknod /dev/fuse c 10 229 || true
-            chmod 666 /dev/fuse || true
-          fi
-          export APPIMAGE_EXTRACT_AND_RUN=1
-      - name: Install CMake 3.19+
-        run: |
-          apt-get install -y software-properties-common
-          apt-get update
-          apt-get install -y cmake=3.19.* || {
-            wget -O - https://apt.kitware.com/keys/kitware-archive-latest.asc 2>/dev/null | apt-key add -
-            apt-add-repository 'deb https://apt.kitware.com/ubuntu/ focal main'
-            apt-get update
-            apt-get install -y cmake
-          }
-      - name: Cache Qt
-        id: cache-qt
-        uses: actions/cache@v4
-        with:
-          path: ${{ env.qt-install-path }}/${{ matrix.qt-arch-install }}
-          key: ubuntu-20.04/${{ matrix.qt-ver }}/${{ matrix.qt-arch-install }}
-      - name: Install Qt
-        uses: jurplel/install-qt-action@v4.1.1
-        with:
-          version: ${{ matrix.qt-ver }}
-          cache: ${{ steps.cache-qt.outputs.cache-hit }}
-          setup-python: false
-      - name: Build Release
+          test "$(dpkg --print-architecture)" = arm64
+          uname -m
+          dpkg --print-architecture
+
+      - name: Patch upstream Linux build for system ARM64 libraries
         shell: bash
-        env:
-          ENV_QT_PATH: ${{ github.workspace }}/Qt/${{ matrix.qt-ver }}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import re
+
+          app = Path("QtScrcpy/CMakeLists.txt")
+          s = app.read_text()
+          s = s.replace(
+              "if(CMAKE_SIZEOF_VOID_P EQUAL 8)\n    set(QC_CPU_ARCH x64)",
+              "if(CMAKE_SIZEOF_VOID_P EQUAL 8 AND CMAKE_SYSTEM_PROCESSOR MATCHES \"aarch64|arm64\")\n    set(QC_CPU_ARCH arm64)\nelseif(CMAKE_SIZEOF_VOID_P EQUAL 8)\n    set(QC_CPU_ARCH x64)"
+          )
+          app.write_text(s)
+
+          core = Path("QtScrcpy/QtScrcpyCore/CMakeLists.txt")
+          s = core.read_text()
+          start = s.index('if(CMAKE_SYSTEM_NAME STREQUAL "Linux")', s.index('# plantform deps'))
+          end = s.index('\nendif()', start) + len('\nendif()')
+          linux_block = '''
+          if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+              find_package(PkgConfig REQUIRED)
+              pkg_check_modules(FFMPEG REQUIRED IMPORTED_TARGET
+                  libavformat libavcodec libavutil libswscale)
+              target_link_libraries(QtScrcpyCore PRIVATE PkgConfig::FFMPEG z)
+              add_custom_command(TARGET QtScrcpyCore POST_BUILD
+                  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                      "/usr/bin/adb" "${QSC_DEPLOY_PATH}/adb"
+                  COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                      "${CMAKE_CURRENT_SOURCE_DIR}/src/third_party/scrcpy-server"
+                      "${QSC_DEPLOY_PATH}/scrcpy-server"
+              )
+          endif()'''
+          s = s[:start] + linux_block + s[end:]
+          core.write_text(s)
+          PY
+
+      - name: Configure and build
         run: |
           python3 ci/generate-version.py
-          ci/linux/build_for_linux.sh "Release"
-      - name: Get the version
+          cmake -S . -B build-arm64 -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DQT_DESIRED_VERSION=5
+          cmake --build build-arm64 --parallel "$(nproc)"
+          test -x output/arm64/Release/QtScrcpy
+          file output/arm64/Release/QtScrcpy
+          readelf -h output/arm64/Release/QtScrcpy | grep -E 'Class:|Machine:'
+
+      - name: Assemble chroot-compatible package
         shell: bash
-        id: get-version
-        run: echo ::set-output name=version::${GITHUB_REF##*/}
-      - name: Package AppImage
-        shell: bash
-        env:
-          ENV_QT_PATH: ${{ github.workspace }}/Qt/${{ matrix.qt-ver }}
         run: |
-          chmod +x ci/linux/package_appimage.sh
-          ci/linux/package_appimage.sh "Release"
-      - name: Upload AppImage Artifact
+          set -euxo pipefail
+          pkg="$PWD/package/QtScrcpy-arm64"
+          mkdir -p "$pkg/bin" "$pkg/share"
+          install -m755 output/arm64/Release/QtScrcpy "$pkg/bin/QtScrcpy"
+          install -m755 /usr/bin/adb "$pkg/bin/adb"
+          install -m755 output/arm64/Release/scrcpy-server "$pkg/share/scrcpy-server"
+          install -m755 output/arm64/Release/sndcpy.sh "$pkg/bin/sndcpy.sh"
+          install -m644 output/arm64/Release/sndcpy.apk "$pkg/share/sndcpy.apk"
+          if [ -d config ]; then cp -a config "$pkg/share/"; fi
+          if [ -d keymap ]; then cp -a keymap "$pkg/share/"; fi
+          cat > "$pkg/QtScrcpy" <<'EOF'
+          #!/usr/bin/env bash
+          HERE="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+          export QTSCRCPY_ADB_PATH="$HERE/bin/adb"
+          export QTSCRCPY_SERVER_PATH="$HERE/share/scrcpy-server"
+          export QTSCRCPY_DEFAULT_CONFIG_PATH="$HERE/share/config"
+          export QTSCRCPY_DEFAULT_KEYMAP_PATH="$HERE/share/keymap"
+          exec "$HERE/bin/QtScrcpy" "$@"
+          EOF
+          chmod 755 "$pkg/QtScrcpy"
+          cat > "$pkg/README-ANDROID-CHROOT.txt" <<'EOF'
+          QtScrcpy ARM64 Linux package for Android chroot environments
+          
+          Target: aarch64 Linux userspace with glibc (Ubuntu/Parrot/Debian chroot).
+          This is NOT an Android APK and does not run directly in Android's native
+          application environment.
+          
+          Install runtime dependencies inside the chroot:
+            sudo apt update
+            sudo apt install adb qtbase5-dev libqt5multimedia5 libqt5x11extras5 \
+              libqt5opengl5 libx11-xcb1 libxcb-xinerama0 libgl1 libasound2
+          
+          Launch from a graphical chroot session with X11/XWayland configured:
+            ./QtScrcpy
+          
+          For USB access, expose the Android USB device to the chroot and configure
+          udev/device permissions. Wireless ADB can be used where USB passthrough
+          is unavailable. Qt platform plugin xcb requires a working X11/XWayland
+          display and its runtime libraries.
+          EOF
+          tar -C package -czf QtScrcpy-linux-arm64-chroot.tar.gz QtScrcpy-arm64
+          sha256sum QtScrcpy-linux-arm64-chroot.tar.gz
+
+      - name: Upload ARM64 chroot package
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.target-name }}-${{ env.plantform-des }}-${{ matrix.gcc-arch }}-${{ steps.get-version.outputs.version }}-AppImage
-          path: output/appimage/*.AppImage
+          name: QtScrcpy-linux-arm64-chroot
+          path: QtScrcpy-linux-arm64-chroot.tar.gz
           if-no-files-found: error
-      - name: Prepare AppImage for Release
-        if: startsWith(github.ref, 'refs/tags/')
-        run: |
-          APPIMAGE_FILE=$(find output/appimage -name "QtScrcpy-*.AppImage" -type f | head -n 1)
-          if [ -z "$APPIMAGE_FILE" ] || [ ! -f "$APPIMAGE_FILE" ]; then
-            echo "Error: AppImage file not found"
-            exit 1
-          fi
-          FINAL_NAME="${{ env.target-name }}-${{ env.plantform-des }}-${{ matrix.gcc-arch }}-${{ steps.get-version.outputs.version }}.AppImage"
-          cp "$APPIMAGE_FILE" "$FINAL_NAME"
-      - name: Upload AppImage to Releases
-        if: startsWith(github.ref, 'refs/tags/')
-        uses: svenstaro/upload-release-action@2.3.0
-        with:
-          file: ${{ env.target-name }}-${{ env.plantform-des }}-${{ matrix.gcc-arch }}-${{ steps.get-version.outputs.version }}.AppImage
-          asset_name: ${{ env.target-name }}-${{ env.plantform-des }}-${{ matrix.gcc-arch }}-${{ steps.get-version.outputs.version }}.AppImage
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          tag: ${{ github.ref }}
-          overwrite: true
+          retention-days: 30
